@@ -37,6 +37,7 @@ import { normalizeHostSource } from '../runtime/host-source.mjs';
 import { readBridgeQuota } from '../runtime/companion-bridge.mjs';
 import { CompanionControls } from '../runtime/companion-controls.mjs';
 import { showCompanionRefreshFeedback } from '../runtime/companion-refresh-feedback.mjs';
+import {VoiceCache,VoiceSynth,loadVoiceLines,normalizeVoiceSettings,pickVoiceLine,voiceCacheKey} from '../runtime/voice-notifier.mjs';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."),
   args = process.argv.slice(2),
   option = (name) => {
@@ -138,7 +139,84 @@ async function run() {
     frame = null,
     metrics = { movementEvents: 0, positionChanges: 0 },
     lastRuntime = 0,
-    controls = null;
+    controls = null,
+    voice = null;
+  // Voice notifications: audio is pre-synthesized into a bounded cache so the
+  // notification itself can play instantly. Disabled unless the user opts in,
+  // because synthesis needs a local TTS service.
+  function voiceSettingsNow() {
+    return normalizeVoiceSettings({
+      enabled: settings.voiceNotifyEnabled === true,
+      endpoint: settings.voiceEndpoint,
+      voice: settings.voiceName,
+    });
+  }
+  function setupVoice() {
+    const voiceSettings = voiceSettingsNow();
+    if (!voiceSettings.enabled) { voice = null; return null; }
+    if (voice && voice.key === JSON.stringify(voiceSettings)) return voice;
+    const cache = new VoiceCache(path.join(dataDir, "voice-cache"));
+    const lines = loadVoiceLines(path.join(root, "assets", "voice-lines.json"));
+    const synth = new VoiceSynth({ cache, settings: voiceSettings });
+    voice = { key: JSON.stringify(voiceSettings), settings: voiceSettings, cache, lines, synth, counter: 0, lastPlayed: 0 };
+    // Warm in the background; failures stay silent and are retried on demand.
+    void synth.warmUp(lines).then((results) => {
+      voiceWarm = results.filter((row) => row.error).length;
+    }).catch(() => {});
+    return voice;
+  }
+  let voiceWarm = 0;
+  function countVoiceCache(holder) {
+    try {
+      return fs.readdirSync(holder.cache.directory).filter((name) => name.endsWith('.wav')).length;
+    } catch {
+      return 0;
+    }
+  }
+  // DSH exposes pending questions through the userQuestions projection, but the
+  // bridge only publishes known snapshot kinds. Questions are therefore detected
+  // here from the session data the bridge already publishes: a session that
+  // stays in a waiting state across polls. Absent that signal, nothing fires.
+  let questionState = { seenAt: 0, waiting: false };
+  function questionTick() {
+    if (!voice || !voice.settings.enabled) return;
+    let waiting = false;
+    try {
+      const { snapshot } = readBridgeSnapshot(config, "completion", Date.now());
+      waiting = Array.isArray(snapshot?.sessions) && snapshot.sessions.some((row) => row && row.waitingForUser === true);
+    } catch {
+      // No fresh snapshot: never guess a question from stale data.
+      questionState = { seenAt: 0, waiting: false };
+      return;
+    }
+    const now = Date.now();
+    if (waiting && !questionState.waiting && now - questionState.seenAt > 15000) {
+      questionState = { seenAt: now, waiting: true };
+      void playVoice("needs_input");
+    } else if (!waiting) {
+      questionState = { seenAt: questionState.seenAt, waiting: false };
+    }
+  }
+  function playVoice(kind) {
+    if (!voice || !voice.settings.enabled) return false;
+    const text = pickVoiceLine(voice.lines, kind, voice.counter++);
+    if (!text) return false;
+    const key = voiceCacheKey(text, voice.settings.voice);
+    const cached = voice.cache.read(key);
+    if (cached) { voicePlay(cached, text); return true; }
+    // Not cached yet: synthesize for next time and skip this round rather than
+    // stalling the notification behind a multi-second request.
+    void voice.synth.prepare(text).catch(() => {});
+    return false;
+  }
+  function voicePlay(bytes, text) {
+    if (!bytes || !win || win.isDestroyed()) return;
+    // Throttle so a burst of events cannot queue many clips.
+    const now = Date.now();
+    if (now - (voice.lastPlayed || 0) < 4000) return;
+    voice.lastPlayed = now;
+    win.webContents.send("voice", { audio: 'data:audio/wav;base64,' + bytes.toString('base64'), text });
+  }
   const usageService=new UsageService({dataDir,codexHome:config.codexHome,hostSource:config.hostSource,bridgeRoot:config.bridgeRoot,dshHome:config.dshHome,dshProfile:config.dshProfile,onChange:()=>{
     if(editor&&!editor.isDestroyed()&&new URL(editor.webContents.getURL()||'about:blank').searchParams.get('kind')==='usage')editor.webContents.send('state',dialogState('usage'));
   }});
@@ -441,6 +519,12 @@ async function run() {
     }
     if (!settings.taskCompletionBubble) stopMonitor();
     else startMonitor();
+    // Enabling voice (or changing endpoint/voice) rebuilds the synthesizer and
+    // re-warms the cache; turning it off releases the reference.
+    if (previous.voiceNotifyEnabled !== settings.voiceNotifyEnabled ||
+        previous.voiceEndpoint !== settings.voiceEndpoint ||
+        previous.voiceName !== settings.voiceName)
+      setupVoice();
     sync();
     send();
     if (menu && !menu.isDestroyed())
@@ -767,6 +851,7 @@ async function run() {
           ) {
             completionPending = true;
             completionReceived++;
+            void playVoice("completed");
           }
         } catch {}
       }
@@ -1459,6 +1544,9 @@ async function run() {
           "autoQuoteEnabled",
           "autoQuoteIntervalSeconds",
           "taskCompletionBubble",
+          "voiceNotifyEnabled",
+          "voiceEndpoint",
+          "voiceName",
           "followHost",
           "desktopTopmost",
           "colorMode",
@@ -1669,6 +1757,7 @@ async function run() {
   sync();
   ensureWorker();
   startMonitor();
+  setupVoice();
   void probe();
   const timer = setInterval(() => {
     try {
@@ -1684,6 +1773,7 @@ async function run() {
         scene.show("quote");
       completionTick();
       startMonitor();
+      questionTick();
       ensureWorker();
       const f = path.join(dataDir, "status.json");
       if (config.hostSource === 'dsh') {
@@ -1756,6 +1846,14 @@ async function run() {
             ...native.shapeStatus(handle),
           },
           bridgeError: bridge.error,
+          voice: {
+            enabled: settings.voiceNotifyEnabled === true,
+            ready: !!voice,
+            endpoint: settings.voiceEndpoint ?? '',
+            voiceName: settings.voiceName ?? '',
+            failedLines: voiceWarm,
+            cached: voice ? countVoiceCache(voice) : 0,
+          },
           at: Date.now(),
         });
       }

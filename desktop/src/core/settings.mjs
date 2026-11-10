@@ -28,6 +28,9 @@ export const defaults = Object.freeze({
   autoQuoteEnabled: false,
   autoQuoteIntervalSeconds: 300,
   taskCompletionBubble: false,
+  voiceNotifyEnabled: false,
+  voiceEndpoint: "http://127.0.0.1:8020/v1/audio/speech",
+  voiceName: "myvoice",
 });
 const finite = (value, limit = 100000) =>
   value !== null &&
@@ -65,8 +68,12 @@ export function normalizeSettings(saved) {
     "desktopTopmost",
   ])
     if (saved[key] != null) s[key] = saved[key] === true;
-  for (const key of ["autoQuoteEnabled", "taskCompletionBubble"])
+  for (const key of ["autoQuoteEnabled", "taskCompletionBubble", "voiceNotifyEnabled"])
     if (typeof saved[key] === "boolean") s[key] = saved[key];
+  // Voice settings are validated by the notifier itself; only keep strings here
+  // so a corrupt value cannot persist an unexpected type.
+  for (const key of ["voiceEndpoint", "voiceName"])
+    if (typeof saved[key] === "string" && saved[key].length <= 300) s[key] = saved[key];
   if (finite(saved.soundVolume, Number.MAX_VALUE))
     s.soundVolume = Math.max(0, Math.min(1, Number(saved.soundVolume)));
   if (

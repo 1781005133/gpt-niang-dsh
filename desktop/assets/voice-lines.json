@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "notes": {
+    "purpose": "Spoken notification lines, grouped by event kind. Edit only this file to change wording; no code change or rebuild is needed.",
+    "kinds": {
+      "needs_input": "The assistant is asking the user something or waiting on their decision.",
+      "completed": "The assistant finished a turn."
+    },
+    "keepShort": "Synthesis costs roughly 1.5-5 s per sentence and is cached per sentence, so long lines cost more time and disk."
+  },
+  "lines": {
+    "needs_input": [
+      "喂，kiss，过来——这东西我拿不定主意，你看看。",
+      "我盯到这了，再往下我就得替你拿主意了。"
+    ],
+    "completed": [
+      "好了，你自己看吧。",
+      "弄完了……你自己看看。",
+      "做完了，我先休息去了。"
+    ]
+  }
+}

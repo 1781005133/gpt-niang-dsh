@@ -24,5 +24,8 @@ contextBridge.exposeInMainWorld(
     onLamp: (callback) => {
       ipcRenderer.on("lamp", (_event, value) => callback(value));
     },
+    onVoice: (callback) => {
+      ipcRenderer.on("voice", (_event, value) => callback(value));
+    },
   }),
 );

@@ -785,6 +785,28 @@ window.gpt.onPointer?.(value=>{
   holdCursor=value.cursor;
   if(value.start&&!motion.Held)beginHold(value.cursor);
 });
+// Voice notifications arrive as short pre-synthesized WAV clips. Play through
+// the same AudioContext as the click sounds so they share one device.
+let voiceSource = null;
+window.gpt.onVoice?.((value) => {
+  if (!value?.audio || typeof value.audio !== 'string' || !value.audio.startsWith('data:audio/wav;base64,')) return;
+  try {
+    if (!audioContext) audioContext = new AudioContext();
+    void audioContext.resume?.();
+    const binary = atob(value.audio.slice('data:audio/wav;base64,'.length));
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    void audioContext.decodeAudioData(bytes.buffer).then((buffer) => {
+      try { voiceSource?.stop(); } catch {}
+      const next = audioContext.createBufferSource();
+      next.buffer = buffer;
+      next.connect(audioContext.destination);
+      next.onended = () => { if (voiceSource === next) voiceSource = null; };
+      voiceSource = next;
+      next.start();
+    }).catch(() => {});
+  } catch {}
+});
 render(await window.gpt.ready());
 requestAnimationFrame(animation);
 window.widgetVerification = () => ({
