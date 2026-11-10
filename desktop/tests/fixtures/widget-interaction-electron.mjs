@@ -124,7 +124,7 @@ async function main(){try{
     const move=(x,y)=>document.dispatchEvent(new PointerEvent('pointermove',{bubbles:true,clientX:x,clientY:y,pointerId:1,pointerType:'mouse',screenX:x,screenY:y}));
     move(rect.left+rect.width/2,rect.top+rect.height/2);
     await wait(20);
-    const tip=document.querySelector('#widget-tooltip'),tipText=tip?tip.textContent.trim():'',tipInside=tip?tip.getBoundingClientRect():null;
+    const tip=document.querySelector('#widget-tooltip'),tipText=tip?tip.textContent.trim():'',tipInside=tip?tip.getBoundingClientRect():null,bodyHas=!!document.body.querySelector('#widget-tooltip'),stageHas=!!document.getElementById('stage')?.querySelector('#widget-tooltip');
     move(1,1);
     await wait(10);
     const goneAfterMove=document.querySelector('#widget-tooltip')===null;
@@ -134,8 +134,18 @@ async function main(){try{
     document.dispatchEvent(new PointerEvent('pointerleave',{bubbles:true,pointerId:1}));
     await wait(10);
     const goneAfterLeave=document.querySelector('#widget-tooltip')===null;
-    const tooltipHover={shown:!!tip,textLength:tipText.length,nonEmpty:tipText.length>0,inWindow:tipInside?tipInside.left>=-1&&tipInside.top>=-1&&tipInside.right<=innerWidth+1&&tipInside.bottom<=innerHeight+1:false,goneAfterMove,backAgain,goneAfterLeave};
-    return {geometry,quota,audio,audioSwitch:{whileLoading,afterLoading},pointer:{foreign,cancel,blur,outside,pose},music,replacement,quoteLayout,tooltipLifetime:{collapsed:collapsedTooltips,restored:restoredTooltips},tooltipHover,holdDiagnostics:{beforeHold,afterHold,rect:{x:pr.x,y:pr.y,width:pr.width,height:pr.height}}};
+    const tooltipHover={shown:!!tip,textLength:tipText.length,nonEmpty:tipText.length>0,inWindow:tipInside?tipInside.left>=-1&&tipInside.top>=-1&&tipInside.right<=innerWidth+1&&tipInside.bottom<=innerHeight+1:false,insideBody:bodyHas,goneAfterMove,backAgain,goneAfterLeave};
+    // In quote mode the bubble already shows this sentence, so no tooltip may
+    // appear over it and truncate into a duplicate.
+    window.gpt.fixture.state({...initial,image:null,audio:null,scene:{...initial.scene,collapsed:false,mode:'quote'}});
+    await wait(60);
+    const quoteRect=bubbleNode.getBoundingClientRect();
+    move(quoteRect.left+quoteRect.width/2,quoteRect.top+quoteRect.height/2);
+    await wait(20);
+    const quoteModeTooltip=!!document.querySelector('#widget-tooltip');
+    move(1,1);
+    await wait(10);
+    return {geometry,quota,audio,audioSwitch:{whileLoading,afterLoading},pointer:{foreign,cancel,blur,outside,pose},music,replacement,quoteLayout,tooltipLifetime:{collapsed:collapsedTooltips,restored:restoredTooltips},tooltipHover,quoteModeTooltip,holdDiagnostics:{beforeHold,afterHold,rect:{x:pr.x,y:pr.y,width:pr.width,height:pr.height}}};
   })()`);
   await captureGuiEvidence(window,'widget-renderer-fixture');
   console.log(JSON.stringify(report));

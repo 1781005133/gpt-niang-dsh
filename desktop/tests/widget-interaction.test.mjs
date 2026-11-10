@@ -26,7 +26,12 @@ test('renderer keeps geometry lightweight and pointer cancellation does not trig
   assert.equal(result.tooltipHover.shown,true,JSON.stringify(result.tooltipHover));
   assert.equal(result.tooltipHover.nonEmpty,true,JSON.stringify(result.tooltipHover));
   assert.equal(result.tooltipHover.inWindow,true,JSON.stringify(result.tooltipHover));
+  // Mounted on <body>, not inside the scale-transformed #stage that clipped it.
+  assert.equal(result.tooltipHover.insideBody,true,JSON.stringify(result.tooltipHover));
   assert.equal(result.tooltipHover.goneAfterMove,true,JSON.stringify(result.tooltipHover));
   assert.equal(result.tooltipHover.backAgain,true,JSON.stringify(result.tooltipHover));
   assert.equal(result.tooltipHover.goneAfterLeave,true,JSON.stringify(result.tooltipHover));
+  // A quote bubble already shows its sentence; repeating it as a tip truncated
+  // into the half-rendered duplicate that prompted this fix.
+  assert.equal(result.quoteModeTooltip,false,'quote mode must not raise a tooltip');
 });

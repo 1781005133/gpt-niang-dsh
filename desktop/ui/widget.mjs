@@ -142,7 +142,10 @@ function showTooltip(text, anchorElement) {
     tooltipNode = document.createElement("div");
     tooltipNode.id = "widget-tooltip";
     tooltipNode.setAttribute("role", "tooltip");
-    document.getElementById("stage").appendChild(tooltipNode);
+    // Attached to <body>, not #stage: #stage carries a scale transform, so
+    // viewport-based coordinates placed inside it were multiplied and the tip
+    // was clipped by the stage box instead of following the bubble.
+    document.body.appendChild(tooltipNode);
   }
   tooltipAnchor = anchorElement;
   tooltipNode.textContent = value;
@@ -150,7 +153,7 @@ function showTooltip(text, anchorElement) {
     box = tooltipNode.getBoundingClientRect(),
     width = window.innerWidth,
     height = window.innerHeight;
-  // Keep the tip inside the window; prefer below the anchor, flip when short.
+  // Keep the tip fully inside the window; prefer below the anchor, flip when short.
   let left = rect.left + rect.width / 2 - box.width / 2;
   let top = rect.bottom + 8;
   if (top + box.height > height - 4) top = rect.top - box.height - 8;
@@ -162,12 +165,11 @@ function showTooltip(text, anchorElement) {
 // Called on every pointer move; keeps the tip attached to the hovered element
 // and removes it as soon as the pointer is somewhere else.
 function updateTooltip(target) {
+  // Only quota rows carry detail that the bubble itself does not show. In quote
+  // and completion modes the bubble already displays that exact sentence, so a
+  // tooltip repeating it would only overlap and truncate.
   if (target === "bubble" && state && state.scene.mode === "quota" && tooltipText.bubble) {
     showTooltip(tooltipText.bubble, bubble);
-    return;
-  }
-  if (target === "bubble" && state && state.scene.mode !== "quota" && tooltipText.quote) {
-    showTooltip(tooltipText.quote, bubble);
     return;
   }
   hideTooltip();

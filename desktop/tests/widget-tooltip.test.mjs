@@ -37,11 +37,22 @@ test('a collapsed bubble never keeps a tip visible', () => {
 });
 
 test('the tooltip is clamped inside the window and ignores the pointer', () => {
-  assert.match(css, /#widget-tooltip\s*\{[^}]*position:\s*absolute/);
+  // Fixed, not absolute: #stage is scale-transformed, so an absolutely placed tip
+  // had its viewport coordinates multiplied and was clipped by the stage box.
+  assert.match(css, /#widget-tooltip\s*\{[^}]*position:\s*fixed/);
   assert.match(css, /#widget-tooltip\s*\{[^}]*pointer-events:\s*none/);
+  assert.match(source, /document\.body\.appendChild\(tooltipNode\)/);
   // Placement must clamp both axes so the tip cannot render off-screen.
   assert.match(source, /left = Math\.max\(4, Math\.min\(left, width - box\.width - 4\)\)/);
   assert.match(source, /top = Math\.max\(4, Math\.min\(top, height - box\.height - 4\)\)/);
+});
+
+test('quote and completion modes never duplicate the bubble text in a tooltip', () => {
+  // The bubble already renders that sentence; a second copy only overlapped and
+  // truncated it. Only the quota view has detail worth a tip.
+  const update = source.slice(source.indexOf('function updateTooltip'), source.indexOf('function bubbleTransition'));
+  assert.ok(!/tooltipText\.quote/.test(update), 'quote mode must not raise a tooltip');
+  assert.match(update, /state\.scene\.mode === "quota"/);
 });
 
 test('empty tooltip text removes the node instead of showing an empty box', () => {

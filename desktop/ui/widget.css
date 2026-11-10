@@ -225,8 +225,9 @@ body.temporary #menu-button {
    be dismissed while the pointer rests; drawing our own lets it vanish the
    moment the pointer leaves. */
 #widget-tooltip {
-  position: absolute;
+  position: fixed;
   z-index: 40;
+  box-sizing: border-box;
   max-width: 240px;
   padding: 6px 9px;
   border-radius: 8px;
@@ -235,6 +236,7 @@ body.temporary #menu-button {
   color: #f2ecff;
   font: 12px/1.45 "Microsoft YaHei UI", sans-serif;
   white-space: pre-line;
+  overflow-wrap: anywhere;
   pointer-events: none;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
 }
