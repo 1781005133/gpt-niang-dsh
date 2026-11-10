@@ -60,9 +60,10 @@ export function buildMenu(
   check('点角色连续换语录', 'characterQuoteRepeat', sound);
   el('div', '开启后优先使用：首次查看额度，之后连续换语录；点气泡仍可收起。', sound).className = 'hint';
   el("hr", undefined, sound);
-  check('语音提示（DSH 完成／提问时朗读）', 'voiceNotifyEnabled', sound);
-  el("div", "需要本机语音服务在线；首次启用会在后台预先合成每句提示音，需数秒后再响起。", sound).className = "hint";
-  el("div", "提示语可在 assets/voice-lines.json 修改；换音色改下方接口与 voice。", sound).className = "hint";
+  check('语音提示（本轮完成时朗读）', 'voiceNotifyEnabled', sound);
+  el("div", "需要本机语音服务在线；首次启用会在后台预先合成每句提示音，需数秒后才生效。", sound).className = "hint";
+  el("div", "提示语可在 assets/voice-lines.json 修改；换音色改语音服务端即可，无需改程序。", sound).className = "hint";
+  el("div", "「向我提问」的语音暂未接入：桥接还没发布待答问题状态，待补上后再启用。", sound).className = "hint";
   const position = section("显示与位置");
   for(const [value,label]of [["dsh","DSH GPT订阅"],["codex","Codex客户端"]])
     radio(label,(state.settings.hostSource??"dsh")===value,()=>command("host-source",value),position);

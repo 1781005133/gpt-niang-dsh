@@ -173,30 +173,13 @@ async function run() {
       return 0;
     }
   }
-  // DSH exposes pending questions through the userQuestions projection, but the
-  // bridge only publishes known snapshot kinds. Questions are therefore detected
-  // here from the session data the bridge already publishes: a session that
-  // stays in a waiting state across polls. Absent that signal, nothing fires.
-  let questionState = { seenAt: 0, waiting: false };
-  function questionTick() {
-    if (!voice || !voice.settings.enabled) return;
-    let waiting = false;
-    try {
-      const { snapshot } = readBridgeSnapshot(config, "completion", Date.now());
-      waiting = Array.isArray(snapshot?.sessions) && snapshot.sessions.some((row) => row && row.waitingForUser === true);
-    } catch {
-      // No fresh snapshot: never guess a question from stale data.
-      questionState = { seenAt: 0, waiting: false };
-      return;
-    }
-    const now = Date.now();
-    if (waiting && !questionState.waiting && now - questionState.seenAt > 15000) {
-      questionState = { seenAt: now, waiting: true };
-      void playVoice("needs_input");
-    } else if (!waiting) {
-      questionState = { seenAt: questionState.seenAt, waiting: false };
-    }
-  }
+  // Pending questions are not published by the bridge yet: the completion
+  // snapshot carries only per-session usage and the last completed turn, with no
+  // waiting flag. DSH does expose a `userQuestions` projection on the host, so a
+  // proper implementation must extend the bridge to publish it. Until then this
+  // hook is an explicit no-op rather than a guess that would never fire or, worse,
+  // fire on unrelated activity.
+  function questionTick() {}
   function playVoice(kind) {
     if (!voice || !voice.settings.enabled) return false;
     const text = pickVoiceLine(voice.lines, kind, voice.counter++);
@@ -517,7 +500,7 @@ async function run() {
         native.owner(handle, 0);
       } else native.band(handle, false);
     }
-    if (!settings.taskCompletionBubble) stopMonitor();
+    if (!completionMonitorNeeded()) stopMonitor();
     else startMonitor();
     // Enabling voice (or changing endpoint/voice) rebuilds the synthesizer and
     // re-warms the cache; turning it off releases the reference.
@@ -817,9 +800,14 @@ async function run() {
       return;
     workerStarter.ensure();
   }
+  // The completion monitor feeds two independent features: the "turn finished"
+  // bubble and voice notifications. It must therefore run when either is on.
+  function completionMonitorNeeded() {
+    return settings.taskCompletionBubble === true || settings.voiceNotifyEnabled === true;
+  }
   function startMonitor() {
     if (
-      !settings.taskCompletionBubble ||
+      !completionMonitorNeeded() ||
       preview ||
       verify ||
       (monitor && monitor.exitCode === null)
