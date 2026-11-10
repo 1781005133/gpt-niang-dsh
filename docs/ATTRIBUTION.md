@@ -29,14 +29,19 @@
 
 ## 上游许可
 
-上游代码与文档为 **MIT**，完整文本见 [desktop/LICENSE](../desktop/LICENSE)，其中保留：
+上游代码与文档为 **MIT**。完整文本在两处：
+
+- 仓库根 [LICENSE](../LICENSE)：标准 MIT 文本，含上游与适配层版权行，GitHub 据此识别许可类型。
+- [desktop/LICENSE](../desktop/LICENSE)：**与上游文件逐字节相同**，保持原样以免上游声明被无意改动。
+
+两处均保留：
 
 ```text
 Copyright (c) 2026 T7moris
 Copyright (c) 2026 GPT-Niang contributors
 ```
 
-按 MIT 要求，本仓库同样保留上述版权声明与许可文本。
+按 MIT 要求，本仓库在分发中包含上述版权声明与许可文本。素材排除说明见根 [NOTICE](../NOTICE) 与下节，不写进 MIT 正文，以免许可文本被改动。
 
 ## 素材不适用 MIT
 

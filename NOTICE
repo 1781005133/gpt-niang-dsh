@@ -1,15 +1,17 @@
 Copyright (c) 2026 DSH adaptation contributors
+Copyright (c) 2026 T7moris
+Copyright (c) 2026 GPT-Niang contributors
 
 The DSH adaptation layer (bridge/, shared/, tools/, docs/ and the DSH-specific
-changes under desktop/) is released under the MIT License. The full MIT text is
-in LICENSE (identical to desktop/LICENSE), which also carries the upstream
-notices:
-
-    Copyright (c) 2026 T7moris
-    Copyright (c) 2026 GPT-Niang contributors
+changes under desktop/) is released under the MIT License; the full text is in
+LICENSE.
 
 Upstream project: GPT-Niang by T7moris
 https://github.com/T7moris/GPT-Niang/releases
+
+desktop/ is derived from GPT-Niang v1.4.0-beta.3. desktop/LICENSE is kept
+byte-identical to the upstream file so the original notice cannot drift; it
+also carries an asset-scope note.
 
 Character and image assets are NOT covered by MIT. See
 desktop/assets/CHARACTER-NOTICE.txt for the permitted non-commercial use, and
