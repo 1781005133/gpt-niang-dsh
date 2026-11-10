@@ -1,0 +1,8 @@
+{
+  "version": "1.4.0-beta.3",
+  "architecture": "javascript-electron",
+  "channel": "beta",
+  "sourceCommit": "285cb464ebc700be640ecc6a7be4ca3a05ba5371",
+  "platform": "win32",
+  "arch": "x64"
+}

@@ -1,0 +1,2 @@
+# Keep canonical protocol, notices and golden fixtures byte-identical on checkout.
+* -text

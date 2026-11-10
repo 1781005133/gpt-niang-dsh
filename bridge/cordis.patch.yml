@@ -1,0 +1,4 @@
+# Separate identity. Never patches existing subscription or companion plugins.
+- insert:
+    - id: gpt-companion-bridge
+      name: 'dsh-gpt-companion-bridge'

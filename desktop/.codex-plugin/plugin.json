@@ -1,0 +1,28 @@
+{
+  "name": "dsh-gpt-companion",
+  "version": "0.1.0-beta.2",
+  "description": "非官方独立移植：GPT龙娘桌面挂件与DSH GPT订阅桥接，不依赖小鲸鱼。",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "GPT龙娘 · DSH独立版",
+    "shortDescription": "半身龙娘挂件，额度与语录依次切换。",
+    "longDescription": "基于GPT-Niang的非官方独立移植。支持DSH GPT订阅桥接或Codex来源、窗口跟随或桌面模式，保留龙娘形象、语录、音乐律动及本机用量记账；不依赖小鲸鱼。",
+    "developerName": "基于 T7moris 原作的本地独立适配",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive"
+    ],
+    "defaultPrompt": [
+      "让 GPT 娘反馈当前额度用量"
+    ],
+    "brandColor": "#9B86C1",
+    "composerIcon": "./assets/gpt-dragon-niang-bust.png",
+    "logo": "./assets/gpt-dragon-niang-bust.png"
+  },
+  "license": "MIT",
+  "keywords": [
+    "codex",
+    "quota",
+    "widget"
+  ]
+}

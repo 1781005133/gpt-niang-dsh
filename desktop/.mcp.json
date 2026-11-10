@@ -1,0 +1,1 @@
+{"mcpServers":{"dsh-gpt-companion":{"command":"${CLAUDE_PLUGIN_ROOT}/native/DSHDragon.Start.exe","args":["--mcp"]}}}

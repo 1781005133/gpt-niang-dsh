@@ -1,0 +1,29 @@
+{
+  "name": "dsh-gpt-companion",
+  "version": "0.1.0-beta.2",
+  "private": true,
+  "type": "module",
+  "main": "src/bootstrap.cjs",
+  "architecture": "javascript-electron",
+  "description": "GPT龙娘 · DSH独立版（Windows x64）",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron . --candidate",
+    "test": "node scripts/test-companion.mjs",
+    "verify": "electron . --candidate --verify",
+    "prepare:runtime": "node node_modules/electron/install.js",
+    "compile:native": "node scripts/compile-native.mjs",
+    "package:beta": "node scripts/build-release.mjs"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "dependencies": {
+    "bmp-js": "0.1.0",
+    "koffi": "3.3.4",
+    "sharp": "0.35.5"
+  },
+  "devDependencies": {
+    "electron": "45.0.0"
+  }
+}

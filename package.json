@@ -1,0 +1,16 @@
+{
+  "name": "dsh-gpt-companion-workspace",
+  "version": "0.1.0-beta.2",
+  "private": true,
+  "type": "module",
+  "description": "Independent GPT dragon desktop companion and authenticated DSH bridge",
+  "scripts": {
+    "sync": "node tools/sync-shared.mjs",
+    "test:desktop": "node desktop/scripts/test-companion.mjs",
+    "test:bridge": "node --test bridge/tests/*.test.mjs",
+    "audit:runtime": "node tools/audit-runtime.mjs",
+    "audit:protected": "node tools/verify-protected.mjs"
+  },
+  "license": "MIT",
+  "engines": { "node": ">=24" }
+}

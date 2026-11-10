@@ -1,0 +1,15 @@
+import fs from 'node:fs';import path from 'node:path';import {fileURLToPath} from 'node:url';
+const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../desktop');
+const file=path.join(root,'src/install.mjs');let text=fs.readFileSync(file,'utf8');
+if(text.includes('assertCompanionData(plan.dataDir'))throw Error('One-time hardening already applied; edit the current sources instead.');
+const start=text.indexOf('  const pkg = readJson(path.join(source, "package.json"));'),end=text.indexOf('  const registerCodex=',start);
+if(start<0||end<start)throw Error('Source validation block not found');
+const validation=text.slice(start,end);text=text.slice(0,start)+text.slice(end);
+text=text.replace('  assertDirectory(source);','  assertDirectory(source);\n'+validation);
+text=text.replace('  assertDirectory(target);','  assertIndependentPath(target);\n  assertDirectory(target);');
+text=text.replace('  if (\n    same(dataDir, target) ||','  assertCompanionData(dataDir,{programRoot:target});\n  if (\n    same(dataDir, target) ||');
+text=text.replace('  assertDirectory(plan.target);assertDirectory(plan.dataDir);',`  assertIndependentPath(plan.target);assertDirectory(plan.target);assertDirectory(plan.dataDir);\n  validateTarget(plan.target,plan.previous);\n  const sourcePackage=readJson(path.join(fileSource,'package.json'));\n  if(sourcePackage?.name!=='dsh-gpt-companion'||sourcePackage.architecture!=='javascript-electron'||sourcePackage.version!==plan.version)throw Error('候选程序身份或版本不匹配');\n  assertCompanionData(plan.dataDir,{programRoot:plan.target,claim:true});`);
+text=text.replace('    if (args.includes("--uninstall") && plan.registerCodex===true) {','    if (args.includes("--uninstall") && plan.registerCodex===true) {\n      const snapshot=capturePluginRegistration(plan);\n      if(!snapshot.previous){console.log(JSON.stringify({ok:true,dataPreserved:true,pluginAlreadyAbsent:true}));return;}');
+text=text.replace('{ windowsHide: true, timeout: 60000 },','{ windowsHide: true, timeout: 60000, env:{...process.env,CODEX_HOME:plan.codexHome} },');
+fs.writeFileSync(file,text);
+console.log('Source verification moved before helper calls; independent data/source ownership and selected Codex uninstall home hardened.');
