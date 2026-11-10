@@ -117,3 +117,36 @@ test('strict attention validator rejects extra/privacy fields, malformed ids, se
   bad({...sample,hostActive:false});bad({...sample,expiresAt:at+HOST_TTL_MS+1});
   assert.deepEqual(validateAttentionSnapshot({...envelope(),seq:0,events:[],pending:[]}).events,[]);
 });
+
+test('a legacy-mode question announces from the tool call alone and clears on its result',t=>{
+  // The published userQuestions projection only folds the timed variant, so in
+  // the default legacy mode it stays empty. The tool call must still announce.
+  const x=setup(t),s=session('legacy-user');x.host.created(s);
+  x.fold(s,view(),1);
+  assert.equal(x.read().seq,0);
+  const call={turn:1,step:1,callId:'legacy-call-1',name:'ask_user_question',arguments:'{"questions":[{"id":"PRIVATE","question":"PRIVATE"}]}'};
+  x.host.event(s,event(2,'tool/call',call));
+  let a=x.read();
+  assert.equal(a.seq,1);assert.equal(a.pending.length,1);
+  assert.equal(a.pending[0].questionKey,questionKey(s,'legacy-call-1'));
+  // The projection stays empty throughout; it must not clear the live question.
+  x.fold(s,view(),3);x.host.heartbeat();x.repeat();
+  assert.equal(x.read().pending.length,1);assert.equal(x.read().seq,1);
+  // The result ends it, and no second announcement is produced.
+  x.host.event(s,event(4,'tool/result',{turn:1,step:1,message:{role:'tool',toolCallId:'legacy-call-1',content:[{type:'text',text:'PRIVATE ANSWER'}]}}));
+  assert.deepEqual(x.read().pending,[]);assert.equal(x.read().seq,1);
+  // A repeated identical call id never re-announces.
+  x.host.event(s,event(5,'tool/call',call));assert.equal(x.read().seq,1);
+  const text=fs.readFileSync(path.join(x.host.root,'attention.json'),'utf8');
+  for(const secret of ['PRIVATE','legacy-call-1','legacy-user'])assert.equal(text.includes(secret),false);
+});
+
+test('a non-question tool call and child sessions never announce anything',t=>{
+  const x=setup(t),s=session('tools');x.host.created(s);
+  x.host.event(s,event(1,'tool/call',{callId:'c1',name:'pwsh',arguments:'{}'}));
+  x.host.event(s,event(2,'tool/call',{callId:'c2',name:'todo_write',arguments:'{}'}));
+  assert.equal(x.read().seq,0);assert.deepEqual(x.read().pending,[]);
+  const child=session('child',{origin:'subagent'});x.host.created(child);
+  x.host.event(child,event(1,'tool/call',{callId:'c3',name:'ask_user_question',arguments:'{}'}));
+  assert.equal(x.read().seq,0);assert.deepEqual(x.read().pending,[]);
+});

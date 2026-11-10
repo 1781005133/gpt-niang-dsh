@@ -15,7 +15,7 @@ test('standard browser loader entry exports apply/inject and has no Node transpo
 });
 test('release files are self-contained, include canonical contract and expose standard package metadata',async()=>{
   const manifest=JSON.parse(fs.readFileSync(path.join(bridgeRoot,'package.json'),'utf8'));
-  assert.equal(manifest.name,'dsh-gpt-companion-bridge');assert.equal(manifest.version,'0.1.0-beta.1');assert.equal(manifest.dsh.client.platform,'web');assert.equal(manifest.peerDependenciesMeta['@deepseek-ai/dsh-client-connection'].optional,true);assert.equal(manifest.engines.node,'^22.19.0 || >=24.0.0');
+  assert.equal(manifest.name,'dsh-gpt-companion-bridge');assert.match(manifest.version,/^0\.1\.0-beta\.\d+$/);assert.equal(manifest.dsh.client.platform,'web');assert.equal(manifest.peerDependenciesMeta['@deepseek-ai/dsh-client-connection'].optional,true);assert.equal(manifest.engines.node,'^22.19.0 || >=24.0.0');
   if(process.env.DSH_BRIDGE_TEST_SDK_ROOT) { const sdk=JSON.parse(fs.readFileSync(path.join(process.env.DSH_BRIDGE_TEST_SDK_ROOT,'node_modules/@deepseek-ai/dsh-client-connection/package.json'),'utf8'));assert.equal(manifest.peerDependencies['@deepseek-ai/dsh-client-connection'],sdk.version); }
   for(const target of Object.values(manifest.exports)) assert.ok(fs.statSync(path.join(bridgeRoot,target)).isFile());
   for(const name of ['index','host','filesystem','usage-accounting','transport','client-core']) {const text=fs.readFileSync(path.join(bridgeRoot,'lib',`${name}.mjs`),'utf8');assert.ok(!text.includes('../../shared/'));}

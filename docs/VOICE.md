@@ -61,3 +61,9 @@ node --test desktop/tests/voice-notifier.test.mjs
 ```
 
 The suite injects mocked fetch/providers and temporary, project-local independently claimed data directories (removed after each test). It does not call a real TTS service, open a listener, play audio, deploy or push changes. It covers provider identity invalidation, strict URLs/schema, PCM chunk parsing, streaming byte limits, ownership/links, eviction/atomic cleanup, cancellation/timeouts and stale/synchronously failing requests. The leaf-file symlink case reports a skip if Windows does not grant file-symlink privilege; directory-junction and hard-link cases run separately.
+
+## Question notifications
+
+`needs_input` is driven by the bridge, which reads DSH's `userQuestions` projection and also watches the `ask_user_question` tool call directly. The tool-call path matters: the published projection only folds the *timed* question variant, so in the default legacy mode it stays empty. Both paths use only the tool name and its call id; question text, options and answers are never read, hashed or stored.
+
+The bridge publishes a separate `attention.json` snapshot: a bounded ring of new question events plus the currently pending set, with session and question identifiers hashed. It is fenced like the other snapshots, so a reconnect, restart or account change baselines rather than replays, and a question that moves from open to continued is announced once. The desktop monitor turns each new event into one spoken `needs_input` line.

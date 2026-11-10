@@ -90,12 +90,23 @@ export function createBridgeHost({dshHome,profile,env,home,now=Date.now,createId
     if(Number.isSafeInteger(eventSeq) && eventSeq<state.attentionCursor)return;
     if(Number.isSafeInteger(eventSeq))state.attentionCursor=eventSeq;
     // Read only public identity/state metadata. Never inspect questions or answers.
-    if(!view || !Array.isArray(view.active) || view.active.length>64) {state.attentionPending.clear();return;}
-    const next=new Set();
+    // A missing projection must not erase a question learned from the tool call.
+    // `settled` is never read: it carries answers. A question is cleared from
+    // `active` disappearing (when the projection is authoritative) or from its
+    // tool result, not by inspecting settled entries.
+    if(!view || !Array.isArray(view.active) || view.active.length>64) return;
+    const reported=new Set();
     for(const item of view.active) {
-      if(typeof item?.callId!=='string' || !item.callId.length || item.callId.length>4096 || !['open','continued'].includes(item.state)) {state.attentionPending.clear();return;}
-      next.add(hashId(JSON.stringify([state.ref.id,item.callId])));
+      if(typeof item?.callId!=='string' || !item.callId.length || item.callId.length>4096 || !['open','continued'].includes(item.state)) return;
+      reported.add(hashId(JSON.stringify([state.ref.id,item.callId])));
     }
+    // Questions the projection has stopped reporting are over; tool-call entries
+    // remain until their own result arrives, so a projection that reports nothing
+    // (the common case today) cannot silence a live question.
+    for(const questionKey of state.attentionProjection) if(!reported.has(questionKey)) state.attentionPending.delete(questionKey);
+    state.attentionProjection=reported;
+    const next=new Set(state.attentionPending);
+    for(const questionKey of reported) next.add(questionKey);
     const silent=baseline || !state.attentionReady || Number.isSafeInteger(eventSeq) && eventSeq<(state.ref.firstLiveSeq ?? 0);
     for(const questionKey of next)if(!state.attentionSeen.has(questionKey)) {
       // Fail closed after a bounded per-session lifetime dedupe budget, rather
@@ -109,6 +120,37 @@ export function createBridgeHost({dshHome,profile,env,home,now=Date.now,createId
       }
     }
     state.attentionPending=next;state.attentionReady=true;
+  }
+  // Record one pending question from the tool call itself. Only public
+  // identifiers are used: the tool name and its call id. Arguments are never
+  // touched, so no question text or answer can reach a snapshot.
+  function noteQuestionCall(state,event) {
+    if(!state.main || event.data?.name!=='ask_user_question') return;
+    const callId=event.data?.callId;
+    if(typeof callId!=='string' || !callId || callId.length>4096) return;
+    const questionKey=hashId(JSON.stringify([state.ref.id,callId]));
+    // Already pending, already announced, or replayed after settlement: one
+    // question call is announced at most once for its whole lifetime.
+    if(state.attentionPending.has(questionKey) || state.attentionSeen.has(questionKey)) return;
+    if(state.attentionSeen.size>=4096) {state.attentionExhausted=true;return;}
+    state.attentionSeen.add(questionKey);
+    state.attentionPending.add(questionKey);
+    state.attentionReady=true;
+    if(!state.attentionExhausted && attentionSeq<Number.MAX_SAFE_INTEGER) {
+      const createdAt=Math.max(now(),attentionEvents.at(-1)?.createdAt ?? 0);
+      attentionEvents.push({seq:++attentionSeq,sessionKey:state.key,questionKey,createdAt});
+      if(attentionEvents.length>32)attentionEvents.shift();
+    }
+  }
+  // The question is answered (or abandoned) once its tool result arrives.
+  function settleQuestionCall(state,event) {
+    const callId=event.data?.callId ?? event.data?.message?.toolCallId;
+    if(typeof callId!=='string' || !callId) return;
+    const questionKey=hashId(JSON.stringify([state.ref.id,callId]));
+    // Remember the settlement so a replayed call cannot announce the same
+    // question twice; attentionSeen already dedupes, this makes it explicit.
+    state.attentionPending.delete(questionKey);
+    state.attentionProjection.delete(questionKey);
   }
   function sweepAttention() {
     if(!connected())return;
@@ -128,7 +170,7 @@ export function createBridgeHost({dshHome,profile,env,home,now=Date.now,createId
       }
       const cut=projection(session),values=cut?.values,at=now();
       state={key,title:safeTitle(values?.title?.title),updatedAt:at,running:null,lastEvent:-1,main:session.header.origin!=='subagent' && !session.header.parentSession && !(session.header.delegationDepth>0),accounting:new UsageAccounting({sessionKey:key,source:session.header.origin==='subagent' ? 'subagent' : 'dsh',baseline:officialUsage(values?.tokenUsage),at})};
-      state.ref=session;state.attentionReady=false;state.attentionSeen=new Set();state.attentionPending=new Set();state.attentionCursor=-1;state.attentionExhausted=false;
+      state.ref=session;state.attentionReady=false;state.attentionSeen=new Set();state.attentionPending=new Set();state.attentionCursor=-1;state.attentionExhausted=false;state.attentionProjection=new Set();
       updateAttention(state,values?.userQuestions,{baseline:true,eventSeq:cut?.asOfSeq});
       state.archivedRoutes=new Map();sessions.set(key,state);
       if(state.accounting.usage()===null)archiveStore.markGap(accountKey,'PROJECTION_UNAVAILABLE');
@@ -178,6 +220,13 @@ export function createBridgeHost({dshHome,profile,env,home,now=Date.now,createId
     const cut=projection(session),values=cut?.values; state.title=safeTitle(values?.title?.title);
     updateAttention(state,values?.userQuestions,{eventSeq:cut?.asOfSeq ?? event.seq});
     if(event.type==='turn/start' && Number.isSafeInteger(event.data?.turn) && event.data.turn>=0) state.running=event.data.turn;
+    // The published userQuestions projection only folds the *timed* question
+    // variant, which the harness does not always register. The tool call itself
+    // is therefore also used as a signal: the tool name and its call id are
+    // public identifiers, so a question still announces without reading any
+    // question text or answer.
+    if(event.type==='tool/call') noteQuestionCall(state,event);
+    if(event.type==='tool/result') settleQuestionCall(state,event);
     if(['assistant/message','assistant/attempt','llm/retry-started'].includes(event.type)) { state.accounting.settle(event,officialUsage(values?.tokenUsage)); exportLogs(state); }
     if(event.type==='turn/end') {
       if(state.main && state.running===event.data?.turn && event.data?.reason?.kind==='completed') completion={seq:++seq,sessionKey:state.key,turn:event.data.turn,completedAt:event.time};
