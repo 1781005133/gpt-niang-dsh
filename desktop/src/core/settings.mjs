@@ -31,6 +31,8 @@ export const defaults = Object.freeze({
   voiceNotifyEnabled: false,
   voiceEndpoint: "http://127.0.0.1:8020/v1/audio/speech",
   voiceName: "myvoice",
+  voiceModel: "genie",
+  voiceRevision: "",
 });
 const finite = (value, limit = 100000) =>
   value !== null &&
@@ -72,7 +74,7 @@ export function normalizeSettings(saved) {
     if (typeof saved[key] === "boolean") s[key] = saved[key];
   // Voice settings are validated by the notifier itself; only keep strings here
   // so a corrupt value cannot persist an unexpected type.
-  for (const key of ["voiceEndpoint", "voiceName"])
+  for (const key of ["voiceEndpoint", "voiceName", "voiceModel", "voiceRevision"])
     if (typeof saved[key] === "string" && saved[key].length <= 300) s[key] = saved[key];
   if (finite(saved.soundVolume, Number.MAX_VALUE))
     s.soundVolume = Math.max(0, Math.min(1, Number(saved.soundVolume)));

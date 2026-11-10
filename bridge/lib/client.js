@@ -99,10 +99,25 @@ function validateCompletionSnapshot(v) {
   if ((v.seq === 0) !== (completion === null)) fail();
   return bounded({...base,seq:v.seq,sessions,completion});
 }
+function validateAttentionSnapshot(v) {
+  const base=envelope(v,['seq','events','pending'],HOST_TTL_MS);integer(v.seq,Number.MAX_SAFE_INTEGER);
+  if(!Array.isArray(v.events) || v.events.length>32 || !Array.isArray(v.pending) || v.pending.length>64)fail();
+  let previousSeq=0,previousAt=0;
+  const events=v.events.map(e=>{
+    keys(e,['seq','sessionKey','questionKey','createdAt']);integer(e.seq,Number.MAX_SAFE_INTEGER);matches(e.sessionKey,hash);matches(e.questionKey,hash);time(e.createdAt);
+    if(e.seq===0 || e.seq<=previousSeq || e.seq>v.seq || e.createdAt<previousAt || e.createdAt>base.lastSeenAt+MAX_CLOCK_SKEW_MS)fail();
+    previousSeq=e.seq;previousAt=e.createdAt;return {...e};
+  });
+  const pending=v.pending.map(p=>{keys(p,['sessionKey','questionKey']);matches(p.sessionKey,hash);matches(p.questionKey,hash);return {...p};});
+  if((v.seq===0)!==(events.length===0) || events.length && events.at(-1).seq!==v.seq)fail();
+  if(new Set(events.map(e=>e.questionKey)).size!==events.length || new Set(pending.map(p=>p.questionKey)).size!==pending.length)fail();
+  if(!base.hostActive && (v.seq!==0 || events.length || pending.length))fail();
+  return bounded({...base,seq:v.seq,events,pending});
+}
 function parseSnapshot(text, kind) {
   if (typeof text !== 'string' || encoder.encode(text).length > MAX_SNAPSHOT_BYTES) fail();
   let value; try { value = JSON.parse(text); } catch { fail(); }
-  const validator = {host:validateHostSnapshot,quota:validateQuotaSnapshot,completion:validateCompletionSnapshot,'control-status':validateControlStatusSnapshot,'archive-status':validateArchiveStatusSnapshot}[kind]; if (!validator) fail(); return validator(value);
+  const validator = {host:validateHostSnapshot,quota:validateQuotaSnapshot,completion:validateCompletionSnapshot,attention:validateAttentionSnapshot,'control-status':validateControlStatusSnapshot,'archive-status':validateArchiveStatusSnapshot}[kind]; if (!validator) fail(); return validator(value);
 }
 function isSnapshotFresh(snapshot, now = Date.now()) { return Boolean(snapshot?.hostActive === true && Number.isSafeInteger(now) && snapshot.lastSeenAt <= now + MAX_CLOCK_SKEW_MS && snapshot.expiresAt > now && snapshot.lastSeenAt <= snapshot.expiresAt); }
 function snapshotsMatch(host, snapshot) { return Boolean(host && snapshot && host.schemaVersion === SCHEMA_VERSION && snapshot.schemaVersion === SCHEMA_VERSION && host.producer === PRODUCER && snapshot.producer === PRODUCER && host.instanceId === snapshot.instanceId && host.epoch === snapshot.epoch); }

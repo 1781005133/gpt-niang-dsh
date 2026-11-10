@@ -60,10 +60,38 @@ export function buildMenu(
   check('点角色连续换语录', 'characterQuoteRepeat', sound);
   el('div', '开启后优先使用：首次查看额度，之后连续换语录；点气泡仍可收起。', sound).className = 'hint';
   el("hr", undefined, sound);
-  check('语音提示（本轮完成时朗读）', 'voiceNotifyEnabled', sound);
+  check('语音提示（本轮完成、向我提问时朗读）', 'voiceNotifyEnabled', sound);
   el("div", "需要本机语音服务在线；首次启用会在后台预先合成每句提示音，需数秒后才生效。", sound).className = "hint";
-  el("div", "提示语可在 assets/voice-lines.json 修改；换音色改语音服务端即可，无需改程序。", sound).className = "hint";
-  el("div", "「向我提问」的语音暂未接入：桥接还没发布待答问题状态，待补上后再启用。", sound).className = "hint";
+  el("div", "提示语可在 assets/voice-lines.json 修改；换音色/换引擎改下面的语音接口即可，无需改程序。", sound).className = "hint";
+  // Editable voice endpoint/voice/model: the "port" for swapping the engine or
+  // voice later without touching code. Values commit on blur or Enter only.
+  for (const [label, key, placeholder] of [
+    ["语音接口", "voiceEndpoint", "http://127.0.0.1:8020/v1/audio/speech"],
+    ["音色 (voice)", "voiceName", "myvoice"],
+    ["模型 (model)", "voiceModel", "genie"],
+    ["缓存版本", "voiceRevision", "可留空；换音色后可改此值强制重合成"],
+  ]) {
+    const row = el("label", undefined, sound);
+    row.className = "voice-field";
+    el("span", label, row);
+    const input = el("input", undefined, row);
+    input.type = "text";
+    input.value = state.settings[key] ?? "";
+    input.placeholder = placeholder;
+    input.dataset.focusKey = 'setting:' + key;
+    input.setAttribute('aria-label', label);
+    const commit = () => {
+      const value = input.value.trim();
+      if (value === (state.settings[key] ?? "")) return;
+      void command("settings", { [key]: value });
+    };
+    input.onblur = commit;
+    input.onkeydown = (event) => { if (event.key === "Enter") { event.preventDefault(); input.blur(); } };
+  }
+  if (state.runtimeVoice?.error)
+    el("div", "语音未启用：" + state.runtimeVoice.error, sound).className = "hint";
+  else if (state.settings.voiceNotifyEnabled && state.runtimeVoice && !state.runtimeVoice.ready)
+    el("div", "语音正在准备，稍候再试。", sound).className = "hint";
   const position = section("显示与位置");
   for(const [value,label]of [["dsh","DSH GPT订阅"],["codex","Codex客户端"]])
     radio(label,(state.settings.hostSource??"dsh")===value,()=>command("host-source",value),position);

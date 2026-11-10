@@ -56,7 +56,7 @@ function sameHost(before, after) {
   return snapshotsMatch(before, after) && before.revision === after.revision && before.accountKey === after.accountKey;
 }
 export function readBridgeSnapshot(config = {}, kind = 'quota', now = Date.now()) {
-  if (!['quota', 'completion', 'control-status', 'archive-status'].includes(kind)) throw Error('Invalid snapshot kind');
+  if (!['quota', 'completion', 'attention', 'control-status', 'archive-status'].includes(kind)) throw Error('Invalid snapshot kind');
   const connected = kind !== 'control-status';
   const root = resolveBridgeRoot(config), host = readHost(root, now, connected);
   const snapshot = parseSnapshot(readBounded(root, kind + '.json', MAX_SNAPSHOT_BYTES), kind);

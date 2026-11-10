@@ -6,7 +6,7 @@ export const inject=[];
 export function apply(ctx) {
   ctx.inject(['connection'],scope=>scope.effect(()=>{
     const warn=()=>scope.logger?.warn?.('GPT companion bridge unavailable (no private details logged)');
-    const host=createBridgeHost({readProjection:session=>scope.get('sessionProjections')?.snapshot(session,['tokenUsage','title','sessionStats']),listSessions:()=>scope.get('sessions')?.list?.() ?? [],onWarning:warn});
+    const host=createBridgeHost({readProjection:session=>scope.get('sessionProjections')?.snapshot(session,['tokenUsage','title','sessionStats','userQuestions']),listSessions:()=>scope.get('sessions')?.list?.() ?? [],onWarning:warn});
     const disposers=[];
     const safe=fn=>(...args)=>{try{fn(...args);}catch{warn();try{host.invalidate('PROJECTION_FAILED');}catch{}}};
     try {

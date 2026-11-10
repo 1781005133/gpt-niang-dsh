@@ -1,5 +1,5 @@
 import {randomUUID} from 'node:crypto';
-import {PRODUCER, SCHEMA_VERSION, HOST_TTL_MS, QUOTA_TTL_MS, MAX_CLOCK_SKEW_MS, MAX_LOG_FILES, validateHostSnapshot, validateQuotaSnapshot, validateCompletionSnapshot, validateProjection, validateControlStatusSnapshot, validateArchiveStatusSnapshot, unknownQuota} from '../../shared/bridge-protocol.mjs';
+import {PRODUCER, SCHEMA_VERSION, HOST_TTL_MS, QUOTA_TTL_MS, MAX_CLOCK_SKEW_MS, MAX_LOG_FILES, validateHostSnapshot, validateQuotaSnapshot, validateCompletionSnapshot, validateProjection, validateControlStatusSnapshot, validateArchiveStatusSnapshot, validateAttentionSnapshot, unknownQuota} from '../../shared/bridge-protocol.mjs';
 import {createSnapshotFiles,resolveBridgeRoot} from './filesystem.mjs';
 import {hashId,officialUsage,safeTitle,UsageAccounting} from './usage-accounting.mjs';
 import {ConsumerControls} from './controls.mjs';
@@ -8,7 +8,7 @@ export function createBridgeHost({dshHome,profile,env,home,now=Date.now,createId
   const location=resolveBridgeRoot({dshHome,profile,env,home});
   files ??= createSnapshotFiles(location.root);
   const instanceId=createId(); let epoch=createId(),revision=0,active=true,lease=null,accountKey=null,quota=unknownQuota('NO_CLIENT',now()),completion=null,seq=0;
-  const sessions=new Map(); let logFiles=new Map(),identityAt=0;
+  const sessions=new Map(); let logFiles=new Map(),identityAt=0,attentionSeq=0,attentionEvents=[];
   const controls=new ConsumerControls({read:()=>files.readControl?.() ?? null,now});
   const archiveStore=archive ?? new NumericArchive({...archiveOptions,root:location.root,now});
   files.clearLogs();
@@ -22,6 +22,7 @@ export function createBridgeHost({dshHome,profile,env,home,now=Date.now,createId
     if(expires<=at) quota=unknownQuota('STALE_QUOTA',at);
     const quotaValue=validateQuotaSnapshot({...base(QUOTA_TTL_MS,at),expiresAt:Math.min(at+QUOTA_TTL_MS,quota.observedAt+QUOTA_TTL_MS),status:quota});
     files.write('quota.json',quotaValue); files.write('completion.json',completionValue);
+    files.write('attention.json',validateAttentionSnapshot({...base(HOST_TTL_MS,at),seq:attentionSeq,events:attentionEvents,pending:[...sessions.values()].flatMap(s=>[...s.attentionPending].map(questionKey=>({sessionKey:s.key,questionKey}))).slice(0,64)}));
     const control=controls.update(base(HOST_TTL_MS,at),Boolean(active && lease && lease.expiresAt>at));
     files.write('control-status.json',validateControlStatusSnapshot({...base(HOST_TTL_MS,at),control}));
     files.write('archive-status.json',validateArchiveStatusSnapshot({...base(HOST_TTL_MS,at),archive:archiveStore.status(accountKey)}));
@@ -29,7 +30,7 @@ export function createBridgeHost({dshHome,profile,env,home,now=Date.now,createId
   }
   function clear(code='UNAVAILABLE') {
     // Invalidate the host first. Readers cannot reuse an old account while disk cleanup runs.
-    accountKey=null; identityAt=0; quota=unknownQuota(code,now()); epoch=createId(); sessions.clear(); seq=0; completion=null; logFiles.clear();
+    accountKey=null; identityAt=0; quota=unknownQuota(code,now()); epoch=createId(); sessions.clear(); seq=0; completion=null; logFiles.clear(); attentionSeq=0; attentionEvents=[];
     publish(); files.clearLogs();
   }
   function expire() {
@@ -82,7 +83,41 @@ export function createBridgeHost({dshHome,profile,env,home,now=Date.now,createId
     controls.complete(input.refreshResult,input.status,identity,lease.id);
     publish();return {ok:true,value:{epoch}};
   }
-  function snapshot(session) { try { return readProjection(session)?.values ?? null; } catch { return null; } }
+  function projection(session) { try { return readProjection(session) ?? null; } catch { return null; } }
+  function snapshot(session) { return projection(session)?.values ?? null; }
+  function updateAttention(state,view,{baseline=false,eventSeq}={}) {
+    if(!state.main)return;
+    if(Number.isSafeInteger(eventSeq) && eventSeq<state.attentionCursor)return;
+    if(Number.isSafeInteger(eventSeq))state.attentionCursor=eventSeq;
+    // Read only public identity/state metadata. Never inspect questions or answers.
+    if(!view || !Array.isArray(view.active) || view.active.length>64) {state.attentionPending.clear();return;}
+    const next=new Set();
+    for(const item of view.active) {
+      if(typeof item?.callId!=='string' || !item.callId.length || item.callId.length>4096 || !['open','continued'].includes(item.state)) {state.attentionPending.clear();return;}
+      next.add(hashId(JSON.stringify([state.ref.id,item.callId])));
+    }
+    const silent=baseline || !state.attentionReady || Number.isSafeInteger(eventSeq) && eventSeq<(state.ref.firstLiveSeq ?? 0);
+    for(const questionKey of next)if(!state.attentionSeen.has(questionKey)) {
+      // Fail closed after a bounded per-session lifetime dedupe budget, rather
+      // than evicting hashes and potentially announcing the same call twice.
+      if(state.attentionSeen.size>=4096)state.attentionExhausted=true;
+      else state.attentionSeen.add(questionKey);
+      if(!silent && !state.attentionExhausted && attentionSeq<Number.MAX_SAFE_INTEGER) {
+        const createdAt=Math.max(now(),attentionEvents.at(-1)?.createdAt ?? 0);
+        attentionEvents.push({seq:++attentionSeq,sessionKey:state.key,questionKey,createdAt});
+        if(attentionEvents.length>32)attentionEvents.shift();
+      }
+    }
+    state.attentionPending=next;state.attentionReady=true;
+  }
+  function sweepAttention() {
+    if(!connected())return;
+    // At most64 maintained sessions; use the existing heartbeat, no new listener,
+    // discovery scan, transcript traversal, quota query or asynchronous work.
+    for(const state of sessions.values())if(state.main && state.ref) {
+      const cut=projection(state.ref);updateAttention(state,cut?.values?.userQuestions,{eventSeq:cut?.asOfSeq});
+    }
+  }
   function getSession(session) {
     if(!connected() || typeof session?.id!=='string' || session.id.length>512 || session.header?.version!==4) return null;
     const key=hashId(session.id); let state=sessions.get(key);
@@ -91,10 +126,14 @@ export function createBridgeHost({dshHome,profile,env,home,now=Date.now,createId
         const oldest=[...sessions.values()].find(s=>s.running===null);if(!oldest){archiveStore.markGap(accountKey,'SESSION_CAPACITY');return null;}
         removeSession(oldest.key);
       }
-      const values=snapshot(session), at=now();
+      const cut=projection(session),values=cut?.values,at=now();
       state={key,title:safeTitle(values?.title?.title),updatedAt:at,running:null,lastEvent:-1,main:session.header.origin!=='subagent' && !session.header.parentSession && !(session.header.delegationDepth>0),accounting:new UsageAccounting({sessionKey:key,source:session.header.origin==='subagent' ? 'subagent' : 'dsh',baseline:officialUsage(values?.tokenUsage),at})};
+      state.ref=session;state.attentionReady=false;state.attentionSeen=new Set();state.attentionPending=new Set();state.attentionCursor=-1;state.attentionExhausted=false;
+      updateAttention(state,values?.userQuestions,{baseline:true,eventSeq:cut?.asOfSeq});
       state.archivedRoutes=new Map();sessions.set(key,state);
       if(state.accounting.usage()===null)archiveStore.markGap(accountKey,'PROJECTION_UNAVAILABLE');
+    } else if(!state.ref) {
+      state.ref=session;const cut=projection(session);updateAttention(state,cut?.values?.userQuestions,{baseline:true,eventSeq:cut?.asOfSeq});
     }
     return state;
   }
@@ -121,18 +160,23 @@ export function createBridgeHost({dshHome,profile,env,home,now=Date.now,createId
     for(const log of activeLogs){const bytes=files.write(log.file,log.text,true);logFiles.set(log.file,{file:log.file,bytes,sessionKey:state.key});}
   }
   function created(session) { expire(); const state=getSession(session); if(state) publish(); }
-  function changed(session,key) {
-    if(key!=='title') return;
+  function changed(session,key,value,eventSeq) {
+    if(!['title','userQuestions'].includes(key)) return;
     expire(); const state=getSession(session); if(!state) return;
-    state.title=safeTitle(snapshot(session)?.title?.title); state.updatedAt=now(); publish();
+    if(key==='userQuestions') {
+      const cut=value===undefined?projection(session):null;
+      updateAttention(state,value ?? cut?.values?.userQuestions,{eventSeq:eventSeq ?? cut?.asOfSeq});
+    } else state.title=safeTitle(snapshot(session)?.title?.title);
+    state.updatedAt=now(); publish();
   }
   function event(session,event) {
     expire();
-    if(!['turn/start','turn/end','assistant/message','assistant/attempt','llm/retry-started','session/title'].includes(event?.type)) return;
+    if(!['turn/start','turn/end','assistant/message','assistant/attempt','llm/retry-started','session/title','tool/call','tool/result','user/message'].includes(event?.type)) return;
     if(!Number.isSafeInteger(event.seq) || event.seq<(session?.firstLiveSeq ?? 0) || !Number.isSafeInteger(event.time) || event.time<=0 || event.time>now()+MAX_CLOCK_SKEW_MS) return;
     const state=getSession(session); if(!state || event.seq<=state.lastEvent) return;
     state.lastEvent=event.seq; state.updatedAt=event.time;
-    const values=snapshot(session); state.title=safeTitle(values?.title?.title);
+    const cut=projection(session),values=cut?.values; state.title=safeTitle(values?.title?.title);
+    updateAttention(state,values?.userQuestions,{eventSeq:cut?.asOfSeq ?? event.seq});
     if(event.type==='turn/start' && Number.isSafeInteger(event.data?.turn) && event.data.turn>=0) state.running=event.data.turn;
     if(['assistant/message','assistant/attempt','llm/retry-started'].includes(event.type)) { state.accounting.settle(event,officialUsage(values?.tokenUsage)); exportLogs(state); }
     if(event.type==='turn/end') {
@@ -141,12 +185,17 @@ export function createBridgeHost({dshHome,profile,env,home,now=Date.now,createId
     }
     publish();
   }
-  function disposed(session) { expire(); const state=sessions.get(hashId(String(session?.id))); if(state) { state.running=null; state.updatedAt=now(); publish(); } }
+  function disposed(session) { expire(); const state=sessions.get(hashId(String(session?.id))); if(state) { state.running=null; state.ref=null; state.attentionPending.clear(); state.updatedAt=now(); publish(); } }
   publish();
-  const timer=setRepeater(()=>{ if(!active) return; try { expire(); publish(); } catch { onWarning('Bridge heartbeat unavailable'); } },5000); timer?.unref?.();
+  const timer=setRepeater(()=>{ if(!active) return; try { expire(); sweepAttention(); publish(); } catch { onWarning('Bridge heartbeat unavailable'); } },5000); timer?.unref?.();
+  // Shutdown must never throw. If the data root has already gone away (crash
+  // cleanup, uninstalled profile, removed temp dir), publishing the final
+  // inactive snapshot is impossible and there is nothing left to invalidate.
+  function publishSafely() { try { publish(); } catch { onWarning('Bridge snapshot unavailable'); } }
   return {root:location.root,archive:archiveStore,acquire,release,control,project,created,changed,event,disposed,
-    heartbeat(){expire();publish();},
+    heartbeat(){expire();sweepAttention();publish();},
     invalidate:clear,
-    dispose(){if(!active)return;clearRepeater(timer);archiveStore.dispose();active=false;lease=null;clear('HOST_DISCONNECTED');},
+    dispose(){if(!active)return;try{clearRepeater(timer);}catch{}try{archiveStore.dispose();}catch{}active=false;lease=null;
+      try{clear('HOST_DISCONNECTED');}catch{publishSafely();}},
   };
 }

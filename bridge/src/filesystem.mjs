@@ -42,7 +42,7 @@ export function createSnapshotFiles(root) {
   fs.mkdirSync(root,{recursive:true,mode:0o700}); assertNoLinks(root);
   const logs=path.join(root,'numeric-logs','sessions'); assertNoLinks(logs); fs.mkdirSync(logs,{recursive:true,mode:0o700}); assertNoLinks(logs);
   const fileFor=(name,isLog=false) => {
-    if(!(isLog ? /^[0-9a-f-]{36}-[0-9a-f]{64}\.jsonl$/ : /^(host|quota|completion|control-status|archive-status)\.json$/).test(name)) throw Error('Unsafe bridge filename');
+    if(!(isLog ? /^[0-9a-f-]{36}-[0-9a-f]{64}\.jsonl$/ : /^(host|quota|completion|attention|control-status|archive-status)\.json$/).test(name)) throw Error('Unsafe bridge filename');
     return assertNoLinks(path.join(isLog ? logs : root,name));
   };
   const removeLog=name => { const target=fileFor(name,true); try { if(!fs.lstatSync(target).isFile()) throw Error('Unsafe bridge file'); fs.unlinkSync(target); } catch(e) { if(e.code !== 'ENOENT') throw e; } };

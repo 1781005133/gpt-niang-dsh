@@ -118,6 +118,7 @@ async function run() {
     completionReceived = 0,
     completionAck = 0,
     monitor = null,
+    questionMonitor = null,
     quotaWorker = null,
     menu = null,
     menuPlacement = null,
@@ -149,23 +150,44 @@ async function run() {
       enabled: settings.voiceNotifyEnabled === true,
       endpoint: settings.voiceEndpoint,
       voice: settings.voiceName,
+      model: settings.voiceModel,
+      revision: settings.voiceRevision,
     });
   }
   function setupVoice() {
-    const voiceSettings = voiceSettingsNow();
+    // An invalid endpoint is reported, never silently replaced with the default:
+    // otherwise a typo would quietly speak with the wrong service or voice.
+    let voiceSettings;
+    try { voiceSettings = voiceSettingsNow(); }
+    catch (error) { voiceError = error.message; voice = null; return null; }
+    voiceError = "";
     if (!voiceSettings.enabled) { voice = null; return null; }
     if (voice && voice.key === JSON.stringify(voiceSettings)) return voice;
-    const cache = new VoiceCache(path.join(dataDir, "voice-cache"));
-    const lines = loadVoiceLines(path.join(root, "assets", "voice-lines.json"));
-    const synth = new VoiceSynth({ cache, settings: voiceSettings });
-    voice = { key: JSON.stringify(voiceSettings), settings: voiceSettings, cache, lines, synth, counter: 0, lastPlayed: 0 };
-    // Warm in the background; failures stay silent and are retried on demand.
+    // Replacing the synthesizer while a request is in flight would let old audio
+    // land in the cache under a new voice; cancel it first.
+    voice?.synth?.dispose?.();
+    voice = null;
+    // Construction can fail (cache ownership, invalid data directory); report it
+    // instead of letting an exception escape into settings persistence.
+    let cache, lines;
+    try {
+      cache = new VoiceCache(path.join(dataDir, "voice-cache"), { dataDir });
+      lines = loadVoiceLines(path.join(root, "assets", "voice-lines.json"));
+    } catch (error) { voiceError = error.message; return null; }
+    let synth;
+    try { synth = new VoiceSynth({ cache, settings: voiceSettings }); }
+    catch (error) { voiceError = error.message; return null; }
+    const holder = { key: JSON.stringify(voiceSettings), settings: voiceSettings, cache, lines, synth, counter: 0, lastPlayed: 0 };
+    voice = holder;
+    // Warm in the background. A late result from a replaced synthesizer must not
+    // overwrite the current holder's counters.
     void synth.warmUp(lines).then((results) => {
+      if (voice !== holder) return;
       voiceWarm = results.filter((row) => row.error).length;
     }).catch(() => {});
     return voice;
   }
-  let voiceWarm = 0;
+  let voiceWarm = 0, voiceError = "";
   function countVoiceCache(holder) {
     try {
       return fs.readdirSync(holder.cache.directory).filter((name) => name.endsWith('.wav')).length;
@@ -173,18 +195,48 @@ async function run() {
       return 0;
     }
   }
-  // Pending questions are not published by the bridge yet: the completion
-  // snapshot carries only per-session usage and the last completed turn, with no
-  // waiting flag. DSH does expose a `userQuestions` projection on the host, so a
-  // proper implementation must extend the bridge to publish it. Until then this
-  // hook is an explicit no-op rather than a guess that would never fire or, worse,
-  // fire on unrelated activity.
-  function questionTick() {}
+  // Pending questions arrive through the bridge's `attention` snapshot: the
+  // bridge turns DSH's userQuestions projection into hashed, deduped entries, so
+  // this only has to play the line. It needs the DSH host; other sources have no
+  // question projection to read.
+  function questionMonitorNeeded() {
+    return settings.voiceNotifyEnabled === true && config.hostSource === 'dsh';
+  }
+  function startQuestionMonitor() {
+    if (!questionMonitorNeeded() || preview || verify || (questionMonitor && questionMonitor.exitCode === null)) return;
+    questionMonitor = spawnNode('companion-attention-monitor.mjs', [
+      path.join(dataDir, 'dsh-attention-monitor-state.json'),
+      configPath,
+    ]);
+    const started = questionMonitor;
+    let buffer = "";
+    questionMonitor.stdout.on("data", (bytes) => {
+      if (questionMonitor !== started) return;
+      buffer += bytes.toString();
+      const lines = buffer.split("\n");
+      buffer = lines.pop();
+      if (buffer.length > 4096) buffer = "";
+      for (const line of lines) {
+        if (line.length > 2048) continue;
+        try {
+          const event = JSON.parse(line);
+          if (event.type === "attention" && typeof event.questionId === "string" && event.questionId)
+            void playVoice("needs_input");
+        } catch {}
+      }
+    });
+    questionMonitor.on("error", () => {});
+    questionMonitor.stderr.on("data", () => {});
+  }
+  function stopQuestionMonitor() {
+    if (questionMonitor) { questionMonitor.stdin.end(); questionMonitor = null; }
+  }
+  function questionTick() { startQuestionMonitor(); }
   function playVoice(kind) {
     if (!voice || !voice.settings.enabled) return false;
     const text = pickVoiceLine(voice.lines, kind, voice.counter++);
     if (!text) return false;
-    const key = voiceCacheKey(text, voice.settings.voice);
+    const key = voiceCacheKey(text, voice.settings);
     const cached = voice.cache.read(key);
     if (cached) { voicePlay(cached, text); return true; }
     // Not cached yet: synthesize for next time and skip this round rather than
@@ -502,12 +554,16 @@ async function run() {
     }
     if (!completionMonitorNeeded()) stopMonitor();
     else startMonitor();
-    // Enabling voice (or changing endpoint/voice) rebuilds the synthesizer and
-    // re-warms the cache; turning it off releases the reference.
+    // Enabling voice (or changing endpoint/voice/model/revision) rebuilds the
+    // synthesizer and re-warms the cache; turning it off releases the reference.
     if (previous.voiceNotifyEnabled !== settings.voiceNotifyEnabled ||
         previous.voiceEndpoint !== settings.voiceEndpoint ||
-        previous.voiceName !== settings.voiceName)
+        previous.voiceName !== settings.voiceName ||
+        previous.voiceModel !== settings.voiceModel ||
+        previous.voiceRevision !== settings.voiceRevision)
       setupVoice();
+    if (!questionMonitorNeeded()) stopQuestionMonitor();
+    else startQuestionMonitor();
     sync();
     send();
     if (menu && !menu.isDestroyed())
@@ -1027,6 +1083,14 @@ async function run() {
       update: { ...updater.state, ...updater.preferences },
       placement: menuPlacement,
       version: app.getVersion(),
+      runtimeVoice: {
+        enabled: settings.voiceNotifyEnabled === true,
+        ready: !!voice,
+        error: voiceError,
+        failedLines: voiceWarm,
+        cached: voice ? countVoiceCache(voice) : 0,
+        questions: !!questionMonitor && questionMonitor.exitCode === null,
+      },
     };
   }
   function unblock() {
@@ -1535,6 +1599,8 @@ async function run() {
           "voiceNotifyEnabled",
           "voiceEndpoint",
           "voiceName",
+          "voiceModel",
+          "voiceRevision",
           "followHost",
           "desktopTopmost",
           "colorMode",
@@ -1746,6 +1812,7 @@ async function run() {
   ensureWorker();
   startMonitor();
   setupVoice();
+  startQuestionMonitor();
   void probe();
   const timer = setInterval(() => {
     try {
@@ -1839,6 +1906,10 @@ async function run() {
             ready: !!voice,
             endpoint: settings.voiceEndpoint ?? '',
             voiceName: settings.voiceName ?? '',
+            voiceModel: settings.voiceModel ?? '',
+            revision: settings.voiceRevision ?? '',
+            error: voiceError,
+            questions: !!questionMonitor && questionMonitor.exitCode === null,
             failedLines: voiceWarm,
             cached: voice ? countVoiceCache(voice) : 0,
           },

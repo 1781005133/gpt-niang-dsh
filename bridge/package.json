@@ -1,6 +1,6 @@
 {
   "name": "dsh-gpt-companion-bridge",
-  "version": "0.1.0-beta.1",
+  "version": "0.1.0-beta.2",
   "description": "Authenticated local-only DSH quota and sanitized numeric session projection for GPT龙娘 · DSH独立版",
   "type": "module",
   "main": "./lib/index.mjs",
