@@ -232,25 +232,34 @@ async function run() {
     if (questionMonitor) { questionMonitor.stdin.end(); questionMonitor = null; }
   }
   function questionTick() { startQuestionMonitor(); }
+  // Counts of clips actually handed to the renderer, per event kind. This is
+  // durable evidence that a notification was delivered, not merely requested.
+  const voiceSent = { completed: 0, needs_input: 0 };
+  let voiceThrottled = 0;
   function playVoice(kind) {
     if (!voice || !voice.settings.enabled) return false;
     const text = pickVoiceLine(voice.lines, kind, voice.counter++);
     if (!text) return false;
     const key = voiceCacheKey(text, voice.settings);
     const cached = voice.cache.read(key);
-    if (cached) { voicePlay(cached, text); return true; }
+    if (cached && voicePlay(cached, text)) {
+      if (Object.hasOwn(voiceSent, kind)) voiceSent[kind]++;
+      return true;
+    }
+    if (cached) return false;
     // Not cached yet: synthesize for next time and skip this round rather than
     // stalling the notification behind a multi-second request.
     void voice.synth.prepare(text).catch(() => {});
     return false;
   }
   function voicePlay(bytes, text) {
-    if (!bytes || !win || win.isDestroyed()) return;
+    if (!bytes || !win || win.isDestroyed()) return false;
     // Throttle so a burst of events cannot queue many clips.
     const now = Date.now();
-    if (now - (voice.lastPlayed || 0) < 4000) return;
+    if (now - (voice.lastPlayed || 0) < 4000) { voiceThrottled++; return false; }
     voice.lastPlayed = now;
     win.webContents.send("voice", { audio: 'data:audio/wav;base64,' + bytes.toString('base64'), text });
+    return true;
   }
   const usageService=new UsageService({dataDir,codexHome:config.codexHome,hostSource:config.hostSource,bridgeRoot:config.bridgeRoot,dshHome:config.dshHome,dshProfile:config.dshProfile,onChange:()=>{
     if(editor&&!editor.isDestroyed()&&new URL(editor.webContents.getURL()||'about:blank').searchParams.get('kind')==='usage')editor.webContents.send('state',dialogState('usage'));
@@ -1912,6 +1921,8 @@ async function run() {
             questions: !!questionMonitor && questionMonitor.exitCode === null,
             failedLines: voiceWarm,
             cached: voice ? countVoiceCache(voice) : 0,
+            sent: { ...voiceSent },
+            throttled: voiceThrottled,
           },
           at: Date.now(),
         });
