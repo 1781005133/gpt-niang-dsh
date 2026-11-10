@@ -17,8 +17,16 @@ test('renderer keeps geometry lightweight and pointer cancellation does not trig
   assert.deepEqual(result.replacement,{sameIdReloaded:true,resourcesUpdated:true});
   assert.equal(result.quoteLayout.matching,true);assert.equal(result.quoteLayout.cases,3);assert.ok(result.quoteLayout.actualCalls<result.quoteLayout.referenceCalls);
   assert.equal(result.quoteLayout.quotaTooltip,true);assert.equal(result.quoteLayout.colorReset,true);
-  // A native title tooltip is drawn by Windows and cannot be animated away, so
-  // it must be detached on collapse and re-attached when the bubble returns.
+  // Native titles are painted by Windows and cannot be dismissed while the
+  // pointer rests, so the widget draws its own tip and never sets a title.
   assert.deepEqual(result.tooltipLifetime.collapsed,{bubble:false,header:false,rows:false},JSON.stringify(result.tooltipLifetime));
   assert.deepEqual(result.tooltipLifetime.restored,{bubble:true,header:true,rows:true},JSON.stringify(result.tooltipLifetime));
+  // Hovering the bubble shows the widget's own tip; moving away removes it at
+  // once, which a Windows-painted native tip cannot do.
+  assert.equal(result.tooltipHover.shown,true,JSON.stringify(result.tooltipHover));
+  assert.equal(result.tooltipHover.nonEmpty,true,JSON.stringify(result.tooltipHover));
+  assert.equal(result.tooltipHover.inWindow,true,JSON.stringify(result.tooltipHover));
+  assert.equal(result.tooltipHover.goneAfterMove,true,JSON.stringify(result.tooltipHover));
+  assert.equal(result.tooltipHover.backAgain,true,JSON.stringify(result.tooltipHover));
+  assert.equal(result.tooltipHover.goneAfterLeave,true,JSON.stringify(result.tooltipHover));
 });

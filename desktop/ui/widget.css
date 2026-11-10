@@ -220,3 +220,21 @@ body.temporary #menu-button {
 .not-visible {
   visibility: hidden;
 }
+
+/* In-widget tooltip. Windows paints native `title` tips itself, so they cannot
+   be dismissed while the pointer rests; drawing our own lets it vanish the
+   moment the pointer leaves. */
+#widget-tooltip {
+  position: absolute;
+  z-index: 40;
+  max-width: 240px;
+  padding: 6px 9px;
+  border-radius: 8px;
+  border: 1px solid rgba(116, 90, 152, 0.55);
+  background: rgba(28, 22, 38, 0.96);
+  color: #f2ecff;
+  font: 12px/1.45 "Microsoft YaHei UI", sans-serif;
+  white-space: pre-line;
+  pointer-events: none;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+}

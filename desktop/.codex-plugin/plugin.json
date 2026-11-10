@@ -1,6 +1,6 @@
 {
   "name": "dsh-gpt-companion",
-  "version": "0.1.0-beta.3",
+  "version": "0.1.0-beta.4",
   "description": "非官方独立移植：GPT龙娘桌面挂件与DSH GPT订阅桥接，不依赖小鲸鱼。",
   "mcpServers": "./.mcp.json",
   "interface": {

@@ -105,16 +105,37 @@ async function main(){try{
     window.gpt.fixture.state({...initial,image:null,audio:null,colors:{...initial.colors,scope:'full'}});
     window.gpt.fixture.state({...initial,image:null,audio:null});
     const colorReset=!document.querySelector('.bar').style.backgroundImage&&!document.querySelector('.bar').classList.contains('flow-fill');
-    const quoteLayout={cases:texts.length,matching,referenceCalls,actualCalls,quotaTooltip:document.getElementById('bubble').title==='fixture',colorReset};
-    // Regression: a native OS tooltip must not outlive the bubble it belongs to.
+    // The quota details are now drawn in-widget; a native title is painted by
+    // Windows and could not be dismissed while the pointer rests.
+    const quoteLayout={cases:texts.length,matching,referenceCalls,actualCalls,quotaTooltip:document.getElementById('bubble').getAttribute('title')===null,colorReset};
+    // Neither state may attach a native title: the in-widget tip replaces it.
     const bubbleNode=document.getElementById('bubble'),headerNode=document.getElementById('header');
     window.gpt.fixture.state({...initial,image:null,audio:null,scene:{...initial.scene,collapsed:true}});
     await wait(60);
     const collapsedTooltips={bubble:bubbleNode.hasAttribute('title'),header:headerNode.hasAttribute('title'),rows:[...document.querySelectorAll('.quota-row .reset')].some(el=>el.hasAttribute('title'))};
     window.gpt.fixture.state({...initial,image:null,audio:null,scene:{...initial.scene,collapsed:false}});
     await wait(60);
-    const restoredTooltips={bubble:bubbleNode.title==='fixture',header:headerNode.title==='fixture',rows:[...document.querySelectorAll('.quota-row .reset')].every(el=>el.title==='fixture')};
-    return {geometry,quota,audio,audioSwitch:{whileLoading,afterLoading},pointer:{foreign,cancel,blur,outside,pose},music,replacement,quoteLayout,tooltipLifetime:{collapsed:collapsedTooltips,restored:restoredTooltips},holdDiagnostics:{beforeHold,afterHold,rect:{x:pr.x,y:pr.y,width:pr.width,height:pr.height}}};
+    const restoredTooltips={bubble:bubbleNode.getAttribute('title')===null,header:headerNode.getAttribute('title')===null,rows:[...document.querySelectorAll('.quota-row .reset')].every(el=>el.getAttribute('title')===null)};
+    // Real hover behaviour: the in-widget tip appears over the bubble and is
+    // removed on the very next move away, with no timer.
+    window.gpt.fixture.state({...initial,image:null,audio:null,scene:{...initial.scene,collapsed:false,mode:'quota'}});
+    await wait(60);
+    const rect=bubbleNode.getBoundingClientRect();
+    const move=(x,y)=>document.dispatchEvent(new PointerEvent('pointermove',{bubbles:true,clientX:x,clientY:y,pointerId:1,pointerType:'mouse',screenX:x,screenY:y}));
+    move(rect.left+rect.width/2,rect.top+rect.height/2);
+    await wait(20);
+    const tip=document.querySelector('#widget-tooltip'),tipText=tip?tip.textContent.trim():'',tipInside=tip?tip.getBoundingClientRect():null;
+    move(1,1);
+    await wait(10);
+    const goneAfterMove=document.querySelector('#widget-tooltip')===null;
+    move(rect.left+rect.width/2,rect.top+rect.height/2);
+    await wait(20);
+    const backAgain=!!document.querySelector('#widget-tooltip');
+    document.dispatchEvent(new PointerEvent('pointerleave',{bubbles:true,pointerId:1}));
+    await wait(10);
+    const goneAfterLeave=document.querySelector('#widget-tooltip')===null;
+    const tooltipHover={shown:!!tip,textLength:tipText.length,nonEmpty:tipText.length>0,inWindow:tipInside?tipInside.left>=-1&&tipInside.top>=-1&&tipInside.right<=innerWidth+1&&tipInside.bottom<=innerHeight+1:false,goneAfterMove,backAgain,goneAfterLeave};
+    return {geometry,quota,audio,audioSwitch:{whileLoading,afterLoading},pointer:{foreign,cancel,blur,outside,pose},music,replacement,quoteLayout,tooltipLifetime:{collapsed:collapsedTooltips,restored:restoredTooltips},tooltipHover,holdDiagnostics:{beforeHold,afterHold,rect:{x:pr.x,y:pr.y,width:pr.width,height:pr.height}}};
   })()`);
   await captureGuiEvidence(window,'widget-renderer-fixture');
   console.log(JSON.stringify(report));

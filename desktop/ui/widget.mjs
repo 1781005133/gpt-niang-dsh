@@ -102,9 +102,10 @@ function bezier(t, x1, y1, x2, y2) {
   }
   return curve(v, y1, y2);
 }
-// Native `title` tooltips are drawn by the OS and do not fade with the bubble,
-// so a shown tooltip outlives a collapsed bubble. Detach them whenever the
-// bubble is not actually on screen.
+// Native `title` tooltips are painted by Windows, so they stay on screen while
+// the pointer rests and ignore both CSS and the bubble's collapse animation.
+// The quota details are therefore drawn by the widget itself: it can be removed
+// the instant the pointer leaves, which a native tooltip cannot.
 function clearBubbleTooltips() {
   bubble.removeAttribute("title");
   $("header").removeAttribute("title");
@@ -113,15 +114,63 @@ function clearBubbleTooltips() {
     const reset = element.querySelector(".reset");
     if (reset) reset.removeAttribute("title");
   }
+  hideTooltip();
 }
 function applyBubbleTooltips(shown) {
   if (!shown) {
     clearBubbleTooltips();
     return;
   }
-  if (tooltipText.bubble) bubble.title = tooltipText.bubble;
-  if (tooltipText.header) $("header").title = tooltipText.header;
-  if (tooltipText.quote) quote.title = tooltipText.quote;
+  // Never fall back to the OS tooltip: everything is rendered in-widget.
+  bubble.removeAttribute("title");
+  $("header").removeAttribute("title");
+  quote.removeAttribute("title");
+}
+let tooltipNode = null;
+function hideTooltip() {
+  if (tooltipNode) {
+    tooltipNode.remove();
+    tooltipNode = null;
+  }
+  tooltipAnchor = null;
+}
+let tooltipAnchor = null;
+function showTooltip(text, anchorElement) {
+  const value = typeof text === "string" ? text.trim() : "";
+  if (!value || !anchorElement) { hideTooltip(); return; }
+  if (!tooltipNode) {
+    tooltipNode = document.createElement("div");
+    tooltipNode.id = "widget-tooltip";
+    tooltipNode.setAttribute("role", "tooltip");
+    document.getElementById("stage").appendChild(tooltipNode);
+  }
+  tooltipAnchor = anchorElement;
+  tooltipNode.textContent = value;
+  const rect = anchorElement.getBoundingClientRect(),
+    box = tooltipNode.getBoundingClientRect(),
+    width = window.innerWidth,
+    height = window.innerHeight;
+  // Keep the tip inside the window; prefer below the anchor, flip when short.
+  let left = rect.left + rect.width / 2 - box.width / 2;
+  let top = rect.bottom + 8;
+  if (top + box.height > height - 4) top = rect.top - box.height - 8;
+  left = Math.max(4, Math.min(left, width - box.width - 4));
+  top = Math.max(4, Math.min(top, height - box.height - 4));
+  tooltipNode.style.left = left + "px";
+  tooltipNode.style.top = top + "px";
+}
+// Called on every pointer move; keeps the tip attached to the hovered element
+// and removes it as soon as the pointer is somewhere else.
+function updateTooltip(target) {
+  if (target === "bubble" && state && state.scene.mode === "quota" && tooltipText.bubble) {
+    showTooltip(tooltipText.bubble, bubble);
+    return;
+  }
+  if (target === "bubble" && state && state.scene.mode !== "quota" && tooltipText.quote) {
+    showTooltip(tooltipText.quote, bubble);
+    return;
+  }
+  hideTooltip();
 }
 function bubbleTransition(open) {
   clearTimeout(bubbleHideTimer);bubbleHideTimer=null;
@@ -423,14 +472,12 @@ function render(value) {
   }
   lastMusic = value.music;
   lastRevision = value.scene.revision;
-  // The OS draws a title tooltip itself, so a hovered tooltip would otherwise
-  // outlive the bubble it belongs to. Attach it only while the bubble is shown.
+  // Every remaining native title is removed here; the hover text is rendered by
+  // the widget itself so it can disappear as soon as the pointer leaves.
   applyBubbleTooltips(shown);
   for (const element of quotaRows) {
     const reset = element.querySelector(".reset");
-    if (!reset) continue;
-    if (shown && reset.dataset.tooltip) reset.title = reset.dataset.tooltip;
-    else reset.removeAttribute("title");
+    if (reset && reset.getAttribute("title") !== null) reset.removeAttribute("title");
   }
   if (motion) musicLayout();
 }
@@ -526,10 +573,14 @@ function hitUpdate(event) {
 }
 document.addEventListener("pointermove", (event) => {
   if(pointer&&event.pointerId!==pointer.id)return;
-  hitUpdate(event);
+  const hovered = hitUpdate(event);
+  updateTooltip(hovered);
   if (pointer?.target === "role")
     window.gpt.drag({ op: "move", x: event.screenX, y: event.screenY,id:pointer.id });
 });
+// Leaving the widget entirely must also dismiss the tip immediately.
+document.addEventListener("pointerleave", () => hideTooltip());
+document.addEventListener("blur", () => hideTooltip());
 document.addEventListener("pointerdown", (event) => {
   if(pointer)return;
   const target = hitUpdate(event);
